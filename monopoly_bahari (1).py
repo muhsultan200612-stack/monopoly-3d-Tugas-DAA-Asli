@@ -104,6 +104,68 @@ def buat_suara_sederhana(frekuensi, durasi_ms, volume=0.4, fade_out=True):
 
     return pygame.mixer.Sound(buffer=bytes(data))
 
+def buat_suara_sweep(frek_awal, frek_akhir, durasi_ms, volume=0.5, bentuk="sine"):
+    """Suara dengan frekuensi berubah mulus — cocok untuk efek skill."""
+    sample_rate = 22050
+    n_sampel    = int(sample_rate * durasi_ms / 1000)
+    amplitudo   = int(32767 * volume)
+    data        = bytearray(n_sampel * 2)
+    fase        = 0.0
+    for i in range(n_sampel):
+        prog = i / max(1, n_sampel - 1)
+        frek = frek_awal + (frek_akhir - frek_awal) * prog
+        if bentuk == "sine":
+            val = math.sin(fase)
+        elif bentuk == "square":
+            val = 1.0 if math.sin(fase) > 0 else -1.0
+        elif bentuk == "noise":
+            val = random.uniform(-1.0, 1.0) * abs(math.sin(fase)) * 0.7
+        else:
+            val = math.sin(fase)
+        if prog < 0.10:   val *= prog / 0.10
+        elif prog > 0.80: val *= (1.0 - prog) / 0.20
+        fase += 2 * math.pi * frek / sample_rate
+        s = max(-32767, min(32767, int(amplitudo * val)))
+        data[i*2]   =  s & 0xFF
+        data[i*2+1] = (s >> 8) & 0xFF
+    return pygame.mixer.Sound(buffer=bytes(data))
+
+
+def buat_suara_layer(layer_list, volume=0.4):
+    """Gabungkan beberapa sweep secara BERSAMAAN — untuk efek kaya seperti ledakan."""
+    sample_rate  = 22050
+    durasi_total = max(d for _, _, d, *_ in layer_list)
+    n_total      = int(sample_rate * durasi_total / 1000)
+    amplitudo    = int(32767 * volume)
+    buf          = [0.0] * n_total
+    for item in layer_list:
+        f1, f2, dur_ms = item[0], item[1], item[2]
+        bentuk = item[3] if len(item) > 3 else "sine"
+        n      = int(sample_rate * dur_ms / 1000)
+        fase   = 0.0
+        for i in range(min(n, n_total)):
+            prog = i / max(1, n - 1)
+            frek = f1 + (f2 - f1) * prog
+            if bentuk == "sine":
+                val = math.sin(fase)
+            elif bentuk == "square":
+                val = 1.0 if math.sin(fase) > 0 else -1.0
+            elif bentuk == "noise":
+                val = random.uniform(-1.0, 1.0) * abs(math.sin(fase)) * 0.6
+            else:
+                val = math.sin(fase)
+            if prog < 0.08:   val *= prog / 0.08
+            elif prog > 0.75: val *= (1.0 - prog) / 0.25
+            buf[i] += val / len(layer_list)
+            fase += 2 * math.pi * frek / sample_rate
+    data = bytearray(n_total * 2)
+    for i, v in enumerate(buf):
+        s = max(-32767, min(32767, int(amplitudo * v)))
+        data[i*2]   =  s & 0xFF
+        data[i*2+1] = (s >> 8) & 0xFF
+    return pygame.mixer.Sound(buffer=bytes(data))
+
+
 def buat_suara_multitone(nada_list, volume=0.35):
     """
     Konsep: Superposisi Gelombang
@@ -180,6 +242,56 @@ def init_suara():
         suara["pajak"] = buat_suara_multitone(
             [(392, 150), (370, 150), (349, 200)], volume=0.35
         )
+        # ── SUARA SKILL BATTLE ────────────────────────────
+        # 🔥 Fire Attack — api menyembur + meledak
+        try:
+            suara["skill_fire"] = buat_suara_layer([
+                (120,  900, 600, "sine"),
+                (80,   200, 700, "noise"),
+                (1200, 400, 500, "sine"),
+                (300,  150, 800, "square"),
+            ], volume=0.60)
+        except Exception:
+            suara["skill_fire"] = buat_suara_multitone(
+                [(200,60),(400,60),(700,80),(1000,100),(600,150)], volume=0.55)
+
+        # ❄️ Freeze/Cryo Storm — suhu turun + es membeku
+        try:
+            suara["skill_freeze"] = buat_suara_layer([
+                (1400, 180, 800, "sine"),
+                (2000, 800, 400, "sine"),
+                (600,  100, 900, "noise"),
+                (900,  300, 600, "square"),
+            ], volume=0.50)
+        except Exception:
+            suara["skill_freeze"] = buat_suara_multitone(
+                [(1400,100),(1000,130),(700,150),(400,180),(200,300)], volume=0.45)
+
+        # 🌊 Arus Deras — ombak menghantam + menyeret
+        try:
+            suara["skill_arus"] = buat_suara_layer([
+                (100,  600, 400, "noise"),
+                (200,  800, 350, "sine"),
+                (600,  150, 700, "noise"),
+                (400,  200, 600, "sine"),
+            ], volume=0.55)
+        except Exception:
+            suara["skill_arus"] = buat_suara_multitone(
+                [(300,80),(500,70),(700,60),(400,80),(200,200)], volume=0.50)
+
+        # ⛈️ Badai Laut — ledakan area menggelegar
+        try:
+            suara["skill_badai"] = buat_suara_layer([
+                (60,   120, 900, "sine"),
+                (150,  600, 600, "square"),
+                (80,   300, 1000,"noise"),
+                (400,  100, 800, "noise"),
+                (800,  200, 500, "sine"),
+            ], volume=0.70)
+        except Exception:
+            suara["skill_badai"] = buat_suara_multitone(
+                [(80,120),(150,130),(250,140),(150,120),(80,300)], volume=0.65)
+
         print("Efek suara berhasil dimuat!")
     except Exception as e:
         print(f"Sebagian suara gagal: {e}")
@@ -1422,21 +1534,22 @@ def buat_musik_latar(durasi_detik=64, volume=0.18):
     return pygame.mixer.Sound(buffer=bytes(data))
 
 # ─── KONSTANTA ────────────────────────────────────────────
-WIN_W, WIN_H = 1280, 720
+WIN_W, WIN_H = 1280, 720   # default fallback
 UI_W         = 340
+# Deteksi resolusi monitor — diupdate setelah pygame.init()
 FPS          = 60
 BOARD_SIZE   = 40
 TILE         = 1.0
 BOFF         = 5.0
 
 PLAYER_COLORS_GL = [
-    (0.95, 0.25, 0.25, 1.0),
-    (0.25, 0.45, 1.00, 1.0),
-    (0.20, 0.80, 0.30, 1.0),
-    (1.00, 0.80, 0.10, 1.0),
+    (0.95, 0.20, 0.20, 1.0), #P1 Merah
+    (0.25, 0.45, 1.00, 1.0), #P2 Biru
+    (0.20, 0.80, 0.30, 1.0), #P3 Hijau
+    (1.00, 0.80, 0.10, 1.0), #P4 Kuning
 ]
 PLAYER_COLORS_PY = [
-    (240, 60,  60 ),
+    (240, 50, 50),
     (60,  110, 255),
     (50,  200, 75 ),
     (255, 200, 25 ),
@@ -1863,11 +1976,11 @@ class SplashScreen:
         self.judul_y += (self.judul_y_tgt - self.judul_y) * min(1.0, dt * 6)
 
         # Shadow judul
-        tj_shadow = self.fJudul.render("MONOPOLY 3D", True, (0, 0, 0))
+        tj_shadow = self.fJudul.render("MONOPOLY 3D BAHARI", True, (0, 0, 0))
         surf.blit(tj_shadow, (WIN_W//2 - tj_shadow.get_width()//2 + 4,
                                int(self.judul_y) + 4))
         # Judul utama (kuning emas)
-        tj = self.fJudul.render("MONOPOLY 3D", True, (255, 215, 0))
+        tj = self.fJudul.render("MONOPOLY 3D BAHARI", True, (255, 215, 0))
         surf.blit(tj, (WIN_W//2 - tj.get_width()//2, int(self.judul_y)))
 
         # Garis bawah judul
@@ -2003,7 +2116,7 @@ class SplashScreen:
         # ── Header panel ──────────────────────────────────
         th = self.fNormal.render("Pilih Mode Permainan", True, (255, 215, 0))
         panel.blit(th, (PW//2 - th.get_width()//2, 14))
-        ts2 = self.fKecil.render("Atur berapa pemain manusia — sisanya dikendalikan AI", True, (140, 160, 210))
+        ts2 = self.fKecil.render("Tentukan peserta permainan dan tingkatkan tantangan dengan AI. ", True, (140, 160, 210))
         panel.blit(ts2, (PW//2 - ts2.get_width()//2, 38))
         pygame.draw.line(panel, (60, 80, 140), (20, 58), (PW-20, 58), 1)
 
@@ -2101,7 +2214,7 @@ class SplashScreen:
         lev_btns = [
             (1, "Level 1 — Monopoli Klasik",   (30, 130, 70)),
             (2, "Level 2 — Monopoli Galaksi", (50,  50, 180)),
-            (3, "Level 3 — Monopoli Bahari",   (140, 30, 140)),
+            (3, "Level 3 — Monopoli Atlantis",   (140, 30, 140)),
         ]
         self._level_rects = []
         for li, (lv, lbl, lc) in enumerate(lev_btns):
@@ -2142,8 +2255,18 @@ class SplashScreen:
 
     def handle_event(self, ev):
         """Handle input keyboard dan mouse di splash screen"""
+        global WIN_W, WIN_H, UI_W
         if ev.type == QUIT:
             pygame.quit(); sys.exit()
+
+        # F11 fullscreen di splash screen
+        if ev.type == KEYDOWN and ev.key == K_F11:
+            _info = pygame.display.Info()
+            WIN_W = _info.current_w
+            WIN_H = _info.current_h
+            UI_W  = max(300, int(WIN_W * 0.266))
+            pygame.display.set_mode((WIN_W, WIN_H), pygame.FULLSCREEN)
+            return
 
         # ── Fase pilih mode ────────────────────────────────
         if self.fase_layar == "pilih_mode":
@@ -2245,15 +2368,30 @@ class SplashScreen:
 # ─── KELAS GAME ───────────────────────────────────────────
 class MonopolyGame:
     def __init__(self, nama_pemain=None, jumlah_manusia=1, level=1):
+        global WIN_W, WIN_H, UI_W
         pygame.init()
 
+        # Ambil resolusi monitor penuh
+        _info  = pygame.display.Info()
+        WIN_W  = _info.current_w
+        WIN_H  = _info.current_h
+        UI_W   = max(300, int(WIN_W * 0.266))
+
         if OPENGL_AVAILABLE:
+            # ── HD Quality: MSAA 4x Antialiasing ──────────
+            pygame.display.gl_set_attribute(pygame.GL_MULTISAMPLEBUFFERS, 1)
+            pygame.display.gl_set_attribute(pygame.GL_MULTISAMPLESAMPLES, 4)
+            pygame.display.gl_set_attribute(pygame.GL_DEPTH_SIZE, 24)
+            pygame.display.gl_set_attribute(pygame.GL_DOUBLEBUFFER, 1)
             self.screen = pygame.display.set_mode(
                 (WIN_W, WIN_H), DOUBLEBUF | OPENGL
             )
             self._setup_opengl()
         else:
             self.screen = pygame.display.set_mode((WIN_W, WIN_H))
+        # Langsung fullscreen saat mulai
+        pygame.display.toggle_fullscreen()
+        self._is_fullscreen = True
 
         na = 4 - jumlah_manusia
         caption = f"MONOPOLY 3D  |  {jumlah_manusia} Manusia + {na} AI" if na > 0 else "MONOPOLY 3D  |  4 Pemain Hotseat"
@@ -4900,46 +5038,76 @@ class MonopolyGame:
 
     # ─── SETUP OPENGL ─────────────────────────────────────
     def _setup_opengl(self):
+        # ══════════════════════════════════════════════════
+        # HD GRAPHICS UPGRADE
+        # ══════════════════════════════════════════════════
+
         glEnable(GL_DEPTH_TEST)
+        glDepthFunc(GL_LEQUAL)         # Depth test lebih presisi
+
+        # ── Antialiasing garis dan polygon ─────────────────
+        glEnable(GL_MULTISAMPLE)       # MSAA 4x aktif
+        glEnable(GL_LINE_SMOOTH)       # Garis halus tanpa gerigi
+        glEnable(GL_POLYGON_SMOOTH)    # Polygon halus
+        glHint(GL_LINE_SMOOTH_HINT,    GL_NICEST)   # Kualitas terbaik
+        glHint(GL_POLYGON_SMOOTH_HINT, GL_NICEST)
+        glHint(GL_PERSPECTIVE_CORRECTION_HINT, GL_NICEST)  # Perspektif akurat
+
+        # ── Pencahayaan ────────────────────────────────────
         glEnable(GL_LIGHTING)
         glEnable(GL_LIGHT0)
         glEnable(GL_LIGHT1)
+        glEnable(GL_LIGHT2)            # Tambah 1 lampu lagi untuk HD
         glEnable(GL_COLOR_MATERIAL)
         glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE)
-        glShadeModel(GL_SMOOTH)   # Shading halus (Gouraud)
+        glShadeModel(GL_SMOOTH)        # Shading Gouraud halus
 
-        # Lampu utama — terang dari atas
+        # Lampu utama — terang dari atas (lebih putih & tajam)
         glLightfv(GL_LIGHT0, GL_POSITION, [4.0, 16.0, 6.0, 1.0])
-        glLightfv(GL_LIGHT0, GL_DIFFUSE,  [1.0,  0.95, 0.90, 1.0])   # Terang putih hangat
-        glLightfv(GL_LIGHT0, GL_AMBIENT,  [0.55, 0.52, 0.50, 1.0])   # Ambient lebih terang
-        glLightfv(GL_LIGHT0, GL_SPECULAR, [0.40, 0.38, 0.35, 1.0])
+        glLightfv(GL_LIGHT0, GL_DIFFUSE,  [1.0,  0.98, 0.95, 1.0])
+        glLightfv(GL_LIGHT0, GL_AMBIENT,  [0.45, 0.43, 0.42, 1.0])
+        glLightfv(GL_LIGHT0, GL_SPECULAR, [1.0,  1.0,  1.0,  1.0])  # Specular HD
 
-        # Lampu kedua — fill light biru dari samping
+        # Lampu fill — biru dari samping kiri
         glLightfv(GL_LIGHT1, GL_POSITION, [-6.0, 10.0, -4.0, 1.0])
-        glLightfv(GL_LIGHT1, GL_DIFFUSE,  [0.35, 0.40, 0.55, 1.0])   # Fill lebih kuat
-        glLightfv(GL_LIGHT1, GL_AMBIENT,  [0.10, 0.10, 0.15, 1.0])
-        glLightfv(GL_LIGHT1, GL_SPECULAR, [0.05, 0.05, 0.08, 1.0])
+        glLightfv(GL_LIGHT1, GL_DIFFUSE,  [0.30, 0.35, 0.50, 1.0])
+        glLightfv(GL_LIGHT1, GL_AMBIENT,  [0.08, 0.08, 0.12, 1.0])
+        glLightfv(GL_LIGHT1, GL_SPECULAR, [0.20, 0.20, 0.30, 1.0])
 
-        # Material global — sedikit specular untuk kesan glossy realistis
-        glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR,  [0.15, 0.15, 0.15, 1.0])
-        glMaterialf (GL_FRONT_AND_BACK, GL_SHININESS, 18.0)
+        # Lampu rim — aksen dari belakang (HD depth)
+        glLightfv(GL_LIGHT2, GL_POSITION, [2.0, 8.0, -10.0, 1.0])
+        glLightfv(GL_LIGHT2, GL_DIFFUSE,  [0.20, 0.22, 0.28, 1.0])
+        glLightfv(GL_LIGHT2, GL_AMBIENT,  [0.0,  0.0,  0.0,  1.0])
+        glLightfv(GL_LIGHT2, GL_SPECULAR, [0.10, 0.10, 0.15, 1.0])
 
+        # Material — glossy lebih tinggi untuk HD
+        glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR,  [0.35, 0.35, 0.35, 1.0])
+        glMaterialf (GL_FRONT_AND_BACK, GL_SHININESS, 48.0)  # 18 → 48 = lebih glossy
+
+        # ── Blending & Transparansi ────────────────────────
         glEnable(GL_BLEND)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
 
-        # Global ambient — pastikan tidak ada area yang terlalu gelap
-        glLightModelfv(GL_LIGHT_MODEL_AMBIENT, [0.25, 0.25, 0.28, 1.0])
+        # ── Global ambient lebih seimbang ──────────────────
+        glLightModelfv(GL_LIGHT_MODEL_AMBIENT,       [0.20, 0.20, 0.22, 1.0])
+        glLightModeli (GL_LIGHT_MODEL_LOCAL_VIEWER,  1)     # Specular lebih akurat
+        glLightModeli (GL_LIGHT_MODEL_TWO_SIDE,      1)     # Render 2 sisi
 
-        # Fog sangat jauh agar tidak menggelapkan papan
+        # ── Fog lebih jauh & lembut ───────────────────────
         glEnable(GL_FOG)
-        glFogi(GL_FOG_MODE,   GL_LINEAR)
-        glFogfv(GL_FOG_COLOR, [0.07, 0.09, 0.14, 1.0])
-        glFogf(GL_FOG_START,  35.0)   # Jauh dari papan
-        glFogf(GL_FOG_END,    60.0)
+        glFogi (GL_FOG_MODE,    GL_LINEAR)
+        glFogfv(GL_FOG_COLOR,   [0.05, 0.07, 0.12, 1.0])
+        glFogf (GL_FOG_START,   45.0)   # Lebih jauh dari sebelumnya (35)
+        glFogf (GL_FOG_END,     80.0)   # Gradasi lebih panjang
+        glHint (GL_FOG_HINT,    GL_NICEST)
 
+        # ── Proyeksi perspektif HD ─────────────────────────
         glMatrixMode(GL_PROJECTION)
         glLoadIdentity()
-        gluPerspective(45.0, (WIN_W - UI_W) / WIN_H, 0.1, 100.0)
+        gluPerspective(42.0, (WIN_W - UI_W) / WIN_H, 0.05, 150.0)
+        # FOV 42 (dari 45) = sedikit lebih zoom, tampak lebih HD
+        # Near 0.05 (dari 0.1) = objek dekat tidak terpotong
+        # Far 150 (dari 100) = background lebih luas
         glMatrixMode(GL_MODELVIEW)
 
     # ─── LOG ──────────────────────────────────────────────
@@ -5888,6 +6056,7 @@ class MonopolyGame:
         if attacker.skill_fire <= 0 or not target.aktif or target_id == self.giliran:
             return
         attacker.skill_fire -= 1
+        self._play("skill_fire")   # 🔥 Api menyembur + meledak
 
         # Damage tetap 20 Cr
         dmg  = min(20, target.uang)
@@ -5953,7 +6122,7 @@ class MonopolyGame:
         self._log(f"CRYO STORM! {attacker.nama} → {target.nama}" if self.level==3 else f"FREEZE ATTACK! {attacker.nama} → {target.nama}")
         self._log(f"{target.nama} membeku! Tidak bisa bergerak 1 turn!")
         self._trigger_camera_shake(1.5)
-        self._play("beli")
+        self._play("skill_freeze")   # ❄️ Es turun + kristal membeku
 
         # Efek layar untuk penyerang — tidak ada popup kartu
         # Simpan notif kartu untuk ditampilkan saat giliran target
@@ -5988,7 +6157,7 @@ class MonopolyGame:
         self.badai_t         = 0.0
         self.badai_hit_timer = 4.0
         self._trigger_camera_shake(2.0)
-        self._play("penjara")
+        self._play("skill_badai")   # ⛈️ Ledakan area menggelegar
 
     def _gunakan_arus_deras(self, target_id):
         """Arus Deras — mundurkan target 3-5 kotak + animasi pusaran air."""
@@ -6020,7 +6189,7 @@ class MonopolyGame:
         self._log(f"ARUS DERAS! {attacker.nama} ke {target.nama}")
         self._log(f"{target.nama} terseret arus — mundur {mundur} kotak!")
         self._trigger_camera_shake(1.2)
-        self._play("penjara")
+        self._play("skill_arus")   # 🌊 Ombak menghantam + menyeret
 
         # Hanya efek layar — tidak ada popup kartu saat menyerang
         self.arus_hit_timer = 4.0
@@ -21196,8 +21365,14 @@ class MonopolyGame:
             pygame.draw.rect(panel,(255,215,0,200),(6,by-10,PW-12,100),2,border_radius=10)
             tw = self.fB.render(f"MENANG: {self.pemenang.nama}!", True,(255,215,0))
             panel.blit(tw,(PW//2-tw.get_width()//2,by+10))
-            tr = self.fS.render("[R] Ulang   [Q] Keluar", True,(180,200,255))
-            panel.blit(tr,(PW//2-tr.get_width()//2,by+44))
+            lv_next   = (self.level % 3) + 1
+            nama_lvnx = ["Klasik","Galaksi","Atlantis"][lv_next-1]
+            tr  = self.fS.render("[R] Ulang Level Ini", True,(180,200,255))
+            panel.blit(tr,(PW//2-tr.get_width()//2,by+38))
+            tn  = self.fS.render(f"[F12] Lanjut Level {lv_next} — {nama_lvnx}", True,(0,255,150))
+            panel.blit(tn,(PW//2-tn.get_width()//2,by+58))
+            tq  = self.fS.render("[Q] Keluar", True,(255,120,120))
+            panel.blit(tq,(PW//2-tq.get_width()//2,by+78))
 
         # Footer
         ikon_m = "ON" if self.musik_aktif else "OFF"
@@ -21464,6 +21639,7 @@ class MonopolyGame:
 
     # ─── EVENT ────────────────────────────────────────────
     def handle(self, ev):
+        global WIN_W, WIN_H, UI_W
         if ev.type == QUIT:
             pygame.quit(); sys.exit()
 
@@ -21592,6 +21768,15 @@ class MonopolyGame:
         elif key == K_F10:
             self.setting_aktif = not getattr(self,'setting_aktif',False)
             return
+        elif key == K_F11:
+            # Toggle fullscreen pakai toggle_fullscreen() — aman untuk OpenGL
+            self._is_fullscreen = not getattr(self, '_is_fullscreen', True)
+            pygame.display.toggle_fullscreen()
+            if self._is_fullscreen:
+                self._log("F11: Fullscreen ON ✅")
+            else:
+                self._log("F11: Mode Jendela")
+            return
         # Shortcut Kecepatan AI
         elif key == K_F1:
             self._set_ai_speed("lambat")
@@ -21611,13 +21796,27 @@ class MonopolyGame:
             self._tutup_kartu()
             return
 
-        # ── 2. Game over: HANYA R atau Q ──────────────────
+        # ── 2. Game over: R = Ulang, F12 = Next Level, Q = Keluar ──
         if self.game_over:
             if key == K_r:
-                # Simpan nama pemain sebelum restart
+                # [R] Ulangi level yang sama
                 nama_sebelumnya = [p.nama for p in self.pemain]
                 self.__init__(nama_pemain=nama_sebelumnya)
-            elif key == K_q: pygame.quit(); sys.exit()
+            elif key == K_F12:
+                # [F12] Lanjut ke level berikutnya
+                nama_sebelumnya  = [p.nama for p in self.pemain]
+                jml_manusia      = sum(1 for p in self.pemain if not p.is_ai)
+                level_berikutnya = self.level + 1
+                if level_berikutnya > 3:
+                    level_berikutnya = 1
+                self.__init__(
+                    nama_pemain    = nama_sebelumnya,
+                    jumlah_manusia = jml_manusia,
+                    level          = level_berikutnya,
+                )
+                self._log(f"🎮 Lanjut ke Level {level_berikutnya}!")
+            elif key == K_q:
+                pygame.quit(); sys.exit()
             return   # Semua tombol lain diabaikan saat game over
 
         # ── 3. Animasi berlangsung: blok semua ────────────
